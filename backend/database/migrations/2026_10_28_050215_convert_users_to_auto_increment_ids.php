@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
@@ -10,6 +10,14 @@ return new class extends Migration
     {
         $driver = DB::connection()->getDriverName();
         if ($driver !== "mysql") {
+            return;
+        }
+
+        // Migration này dựng lại bảng users và chỉ giữ một số cột cũ. Khi id đã là số
+        // tự tăng (hệ thống đang chạy), chạy lại sẽ làm mất user_code, timekeeping_code,
+        // org_level... nên phải bỏ qua.
+        if (! Schema::hasTable("users")
+            || in_array(Schema::getColumnType("users", "id"), ["bigint", "int", "integer", "mediumint", "smallint"], true)) {
             return;
         }
 

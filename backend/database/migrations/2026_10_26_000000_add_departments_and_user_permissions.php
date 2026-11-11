@@ -26,14 +26,18 @@ return new class extends Migration
             });
         }
 
-        if (! Schema::hasTable('user_permissions')) {
-            Schema::create('user_permissions', function (Blueprint $table): void {
-                $table->char('user_id', 36)->collation('utf8mb4_0900_ai_ci');
-                $table->string('permission', 40);
-                $table->primary(['user_id', 'permission']);
-                $table->foreign('user_id')->references('id')->on('users')->cascadeOnDelete();
-            });
+        // Chỉ cấp quyền mặc định khi bảng quyền vừa được tạo lần đầu; nếu bảng đã có
+        // (hệ thống đang chạy) thì không được tự cấp quyền cho toàn bộ nhân viên.
+        if (Schema::hasTable('user_permissions')) {
+            return;
         }
+
+        Schema::create('user_permissions', function (Blueprint $table): void {
+            $table->char('user_id', 36)->collation('utf8mb4_0900_ai_ci');
+            $table->string('permission', 40);
+            $table->primary(['user_id', 'permission']);
+            $table->foreign('user_id')->references('id')->on('users')->cascadeOnDelete();
+        });
 
         $existingUsers = DB::table('users')->where('role', '!=', 'admin')->pluck('id');
         foreach ($existingUsers as $userId) {
