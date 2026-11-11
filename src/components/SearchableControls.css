@@ -1,0 +1,338 @@
+.search-list-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr);
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.search-list-controls > label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: #667085;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.search-list-controls input,
+.searchable-select > input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
+  font-size: 0.84rem;
+}
+
+.search-list-controls input:focus,
+.searchable-select > input:focus {
+  outline: 3px solid rgba(57, 116, 246, 0.14);
+  border-color: #8eafff;
+}
+
+.searchable-select > input:disabled {
+  cursor: not-allowed;
+  background: #f2f4f7;
+  color: #98a2b3;
+}
+
+.search-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #667085;
+  font-size: 0.74rem;
+}
+
+.search-pagination > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.search-pagination button {
+  min-height: 30px;
+  border: 1px solid #dce5f4;
+  border-radius: 7px;
+  padding: 5px 8px;
+  background: #f8faff;
+  color: #3158a8;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.search-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.search-list-controls.compact {
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.search-list-controls.compact > label {
+  gap: 3px;
+  font-size: 0.7rem;
+}
+
+.search-list-controls.compact input {
+  min-height: 34px;
+}
+
+.search-pagination.compact {
+  font-size: 0.68rem;
+}
+
+.search-pagination.compact button {
+  min-height: 27px;
+  padding: 4px 6px;
+}
+
+.searchable-select {
+  position: relative;
+  min-width: 0;
+}
+
+.searchable-multi-select {
+  display: grid;
+  gap: 6px;
+}
+
+.searchable-multi-select-search {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: #667085;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.searchable-multi-select-search input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
+  font-size: 0.84rem;
+}
+
+.searchable-multi-select-search input:focus {
+  outline: 3px solid rgba(57, 116, 246, 0.14);
+  border-color: #8eafff;
+}
+
+.searchable-multi-select-search input:disabled {
+  cursor: not-allowed;
+  background: #f2f4f7;
+  color: #98a2b3;
+}
+
+.searchable-select-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: 310px;
+  overflow: auto;
+  border: 1px solid #dce5f4;
+  border-radius: 10px;
+  padding: 5px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(24, 48, 91, 0.16);
+}
+
+.searchable-select-menu ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.searchable-select-menu [role="option"] {
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px;
+  background: transparent;
+  color: #344054;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.searchable-select-menu [role="option"]:hover,
+.searchable-select-menu [role="option"][aria-selected="true"] {
+  background: #eff4ff;
+  color: #2456d3;
+}
+
+.searchable-multi-select .searchable-select-menu [role="option"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.searchable-multi-select-done {
+  display: block;
+  min-height: 28px;
+  margin: 0 0 5px auto;
+  border: 1px solid #dce5f4;
+  border-radius: 7px;
+  padding: 4px 9px;
+  background: #f8faff;
+  color: #3158a8;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.searchable-multi-select-check {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  place-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.75rem;
+}
+
+.searchable-multi-select [aria-selected="true"] .searchable-multi-select-check {
+  border-color: #315fe8;
+  background: #315fe8;
+}
+
+.searchable-select.has-department-filter {
+  display: grid;
+  gap: 6px;
+}
+
+.searchable-department-filter {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: #667085;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.searchable-department-filter select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  padding: 7px 10px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+
+.searchable-department-filter select:focus {
+  outline: 3px solid rgba(57, 116, 246, 0.14);
+  border-color: #8eafff;
+}
+
+.searchable-department-filter select:disabled {
+  cursor: not-allowed;
+  background: #f2f4f7;
+  color: #98a2b3;
+}
+
+.searchable-checkbox-list .searchable-department-filter {
+  margin-top: 8px;
+}
+
+.searchable-option-text {
+  min-width: 0;
+}
+
+.searchable-option-department {
+  display: block;
+  margin-top: 1px;
+  color: #98a2b3;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.searchable-select-empty {
+  margin: 8px;
+  color: #667085;
+  font-size: 0.76rem;
+}
+
+.searchable-select-menu .search-pagination {
+  position: sticky;
+  bottom: -5px;
+  margin-top: 5px;
+  padding: 6px 2px 2px;
+  background: #fff;
+}
+
+.searchable-checkbox-list {
+  min-width: 0;
+}
+
+.searchable-checkbox-list > p {
+  margin: 5px 0 10px;
+  color: #667085;
+  font-size: 0.78rem;
+}
+
+.searchable-checkbox-options {
+  display: grid;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.searchable-checkbox-options > label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  color: #344054;
+  font-size: 0.82rem;
+}
+
+.searchable-checkbox-options > label input[type="checkbox"] {
+  width: auto;
+  min-height: auto;
+  accent-color: #315fe8;
+}
+
+.searchable-checkbox-options > label span {
+  overflow-wrap: anywhere;
+}
+
+.searchable-checkbox-options input[type="checkbox"] {
+  flex: 0 0 auto;
+}
+
+@media (min-width: 640px) {
+  .search-list-controls {
+    grid-template-columns: minmax(200px, 1fr) auto;
+    align-items: end;
+  }
+}
