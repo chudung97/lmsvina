@@ -11,7 +11,8 @@ Workdesk stores application data in MySQL and uploaded PDFs on disk. MySQL Serve
 - For a production build, run `npm run build`, then `npm run start:lan`. Laravel serves the built frontend and API on port 3001, while Reverb listens on port 8091. From another device on the same trusted network, open `http://<this-computer-LAN-IP>:3001`; allow TCP ports 3001 and 8091 on the Windows Firewall **Private** profile if prompted.
 - MySQL Server 8.0 is installed on this Windows machine as the `MySQL80` service, bound to `127.0.0.1:3306`. The Workdesk API uses the existing `lms_vina` database; local connection settings are in the ignored `backend/.env` file.
 - To inspect this database in MySQL Workbench, connect to host `127.0.0.1`, port `3306`, and schema `lms_vina`. Do not commit `backend/.env`.
-- MySQL tables are defined in `database.mysql.sql`. For this LMS database, back up both `lms_vina` and the old `workdesk` database, configure `backend/.env`, then run `php artisan workdesk:install-lms-vina` from `backend`. The installer preserves existing LMS rows, adds Workdesk profile/authentication fields to `users`, matches the legacy user list by `user_code`, and stops if old Workdesk feature tables contain rows it cannot safely merge.
+- The whole MySQL schema is managed by Laravel migrations in `backend/database/migrations`. On a new machine, create an empty `utf8mb4` database, configure `backend/.env`, then run `php artisan migrate` from `backend`; no MySQL command-line client is needed. `0001_01_00_000000_create_core_tables.php` creates the original Workdesk/LMS tables (users, organization, meetings, gate permits, attendance, legacy PDF seals) and skips any table that already exists, so running `php artisan migrate` on the existing server only records it. Every later migration also checks for existing tables/columns. Back up the database before migrating a server with real data. `database.mysql.sql` is kept only as the historical reference for the old Node schema.
+- To merge an older Workdesk database into an existing LMS database, back up both `lms_vina` and the old `workdesk` database, configure `backend/.env`, then run `php artisan workdesk:install-lms-vina` from `backend`. The installer preserves existing LMS rows, adds Workdesk profile/authentication fields to `users`, matches the legacy user list by `user_code`, and stops if old Workdesk feature tables contain rows it cannot safely merge.
 - After installing the base Workdesk schema, back up `lms_vina` and run `php artisan workdesk:install-organization-hierarchy` from `backend` to add organization levels, divisions, teams, and team membership without replacing existing LMS users or departments. The hierarchy is System admin → CEO → division head → department head → team lead → employee/worker. Employees and workers share the same level; each employee belongs to at most one department and one team.
 - Admins and CEOs can manage the full organization. Division heads, department heads, and team leads can view and manage users within their reporting scope and assign lower levels. Managers can grant any of the available business permissions to their subordinates: meeting room administration, permit approval, gate confirmation, and PDF signing. System admins and CEOs have these business permissions automatically.
 - Existing LMS employees have no Workdesk login email or password. Provision the first administrator from `backend` with `php artisan workdesk:provision-admin <user_code> <email>`; enter the initial password only at the secure prompt. Workdesk users can sign in with their LMS `user_code` or email. The administrator can then add email addresses and issue credentials to other employee accounts.
@@ -116,6 +117,39 @@ Nếu chạy LAN, bạn cần mở cổng TCP 3001 và 8091 trên Windows Firewa
 Lưu ấy
 Kết nối dùng HTTP nên không được mã hoá. Chỉ dùng trong mạng LAN tin cậy, hoặc đặt một reverse proxy HTTPS ở phía trước.
 Khi dev thì dùng npm run dev. Frontend chạy ở http://localhost:5173, API ở cổng 8000.
-Nếu backend\.env vẫn để APP_DEBUG=true, bạn nên đổi thành APP_ENV=production và APP_DEBUG=false khi chạy production.#   l m s v i n a  
- #   l m s v i n a  
- 
+Nếu backend\.env vẫn để APP_DEBUG=true, bạn nên đổi thành APP_ENV=production và APP_DEBUG=false khi chạy production.
+
+
+---------cách chạy chấm công ------------
+
+Collector chấm công là file scripts/zkteco-attendance-collector.cjs. Nó có 3 cách chạy, mọi lệnh đều chạy ở thư mục gốc D:\dungcc-dev.
+
+1. Tự chạy kèm ứng dụng (cách thường dùng)
+Khi bạn chạy npm run start, npm run start:lan hoặc npm run dev, collector khởi động luôn cùng ứng dụng. Nó đọc lịch sử chấm công ngay khi khởi động, sau đó cứ 5 phút đọc lại một lần. Bản ghi mới được lưu vào bảng cham_cong.
+
+Muốn chạy riêng collector, không cần bật cả ứng dụng:
+
+
+node scripts/zkteco-attendance-collector.cjs
+Trên console sẽ hiện log kiểu: [attendance <IP>] History check complete: N new, M scanned.
+
+2. Chỉ kiểm tra kết nối, không ghi DB
+
+node scripts/zkteco-attendance-collector.cjs --check-history
+Lệnh này đọc lịch sử từ từng máy và in ra số bản ghi đọc được. Database giữ nguyên.
+
+3. Thay toàn bộ lịch sử chấm công (thao tác này xoá dữ liệu)
+
+# 1. Backup database lms_vina trước
+cd backend
+php artisan migrate --path=database/migrations/2026_11_02_000002_expand_attendance_device_records.php --force
+cd ..
+npm run attendance:replace
+Lệnh này xoá toàn bộ dữ liệu trong cham_cong, rồi nạp lại từ lịch sử của tất cả các máy. Nếu có máy nào không kết nối được hoặc đọc dữ liệu không đủ, bảng được giữ nguyên.
+
+Cấu hình
+Collector đọc thông tin từ backend/.env:
+
+ZK_ATTENDANCE_DEVICE_IPS: danh sách IP các máy chấm công, cách nhau bằng dấu phẩy. Nếu không khai báo, collector dùng danh sách mặc định 192.168.110.235–238 và 192.168.1.238–240.
+DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD: thông tin kết nối MySQL.
+Máy chạy collector phải kết nối được tới các máy chấm công qua cổng TCP 4370. Collector có khoá MySQL, nên chỉ một tiến trình được quét các máy tại một thời điểm. Nếu ứng dụng đang chạy thì collector đi kèm đã giữ khoá rồi. Vì vậy, khi đó bạn không nên chạy thêm một bản riêng.
