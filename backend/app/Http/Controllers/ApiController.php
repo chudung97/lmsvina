@@ -35,8 +35,9 @@ abstract class ApiController extends Controller
         $department = ! empty($user['department_id'])
             ? DB::table('departments')->where('id', $user['department_id'])->first(['id', 'name', 'manager_user_id', 'division_id'])
             : null;
-        $division = $user['org_level'] === 'division_head'
-            ? DB::table('divisions')->where('manager_user_id', $id)->first(['id', 'name'])
+        $divisionColumn = OrganizationAccess::DIVISION_COLUMNS[$user['org_level'] ?? ''] ?? null;
+        $division = $divisionColumn
+            ? DB::table('divisions')->where($divisionColumn, $id)->first(['id', 'name'])
             : ($department?->division_id
                 ? DB::table('divisions')->where('id', $department->division_id)->first(['id', 'name'])
                 : null);
@@ -52,11 +53,11 @@ abstract class ApiController extends Controller
             'email' => $user['email'] ?? null,
             'role' => $user['role'] ?? null,
             'orgLevel' => $user['org_level'] ?? 'employee',
-            'divisionId' => $division?->id,
+            'divisionId' => $this->responseId($division?->id),
             'divisionName' => $division?->name,
-            'departmentId' => $department?->id,
+            'departmentId' => $this->responseId($department?->id),
             'departmentName' => $department?->name,
-            'teamId' => $team?->id,
+            'teamId' => $this->responseId($team?->id),
             'teamName' => $team?->name,
             'isDepartmentManager' => $department && (int) $department->manager_user_id === (int) $id,
             'permissions' => $permissions,
@@ -69,6 +70,12 @@ abstract class ApiController extends Controller
     protected function responseUserId(mixed $id): ?string
     {
         return $id === null ? null : (string) $id;
+    }
+
+    /** Id của bộ phận/phòng ban/team trả về cho frontend luôn ở dạng chuỗi ("1", "2"...). */
+    protected function responseId(mixed $id): ?string
+    {
+        return $id === null || $id === '' ? null : (string) $id;
     }
 
     protected function hasPermission(object $user, string $permission): bool
@@ -127,34 +134,6 @@ abstract class ApiController extends Controller
             ->whereIn('id', $userIds)
             ->where('active', 1)
             ->count();
-    }
-
-    protected function newSession(int|string $userId): string
-    {
-        $userId = (int) $userId;
-        $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-        DB::table('auth_sessions')->insert([
-            'token_hash' => hash('sha256', $token),
-            'user_id' => $userId,
-            'expires_at' => (int) floor(microtime(true) * 1000) + 12 * 60 * 60 * 1000,
-        ]);
-
-        return $token;
-    }
-
-    protected function sessionCookie(string $token, int $minutes = 720)
-    {
-        return cookie(
-            'workdesk_session',
-            $token,
-            $minutes,
-            '/',
-            null,
-            request()->isSecure(),
-            true,
-            false,
-            'strict',
-        );
     }
 
     protected function normalizedEmail(mixed $value): ?string

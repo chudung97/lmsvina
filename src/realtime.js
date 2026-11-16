@@ -1,6 +1,7 @@
 import Echo from 'laravel-echo'
 import Pusher from 'pusher-js'
 import { useEffect, useState } from 'react'
+import { authHeaders } from './auth-token'
 
 window.Pusher = Pusher
 
@@ -14,6 +15,12 @@ export function connectRealtime(userId) {
     forceTLS: window.location.protocol === 'https:',
     enabledTransports: ['ws', 'wss'],
     authEndpoint: '/api/broadcasting/auth',
+    // Xác thực kênh riêng bằng token Bearer; đọc token mỗi lần để luôn dùng token mới nhất.
+    channelAuthorization: {
+      endpoint: '/api/broadcasting/auth',
+      transport: 'ajax',
+      headersProvider: authHeaders,
+    },
   })
 
   echo.private(`user.${userId}`).listen('.workdesk.updated', (event) => {

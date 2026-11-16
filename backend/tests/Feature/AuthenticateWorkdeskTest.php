@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Http\Middleware\AuthenticateWorkdesk;
+use Closure;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -66,39 +67,43 @@ class AuthenticateWorkdeskTest extends TestCase
 
     public function test_authorization_bypass_setting_does_not_promote_users_to_admin(): void
     {
-        $request = Request::create(
-            'http://workdesk.test/api/meal-reports',
-            'POST',
-            [],
-            ['workdesk_session' => 'session-token'],
-            [],
-            ['HTTP_ORIGIN' => 'http://workdesk.test'],
-        );
-
-        $response = (new AuthenticateWorkdesk)->handle(
-            $request,
-            fn (Request $authenticatedRequest) => response()->json([
-                'role' => $authenticatedRequest->attributes->get('workdesk_user')->role,
-            ]),
-        );
+        $response = $this->handle('Bearer session-token', fn (Request $authenticatedRequest) => response()->json([
+            'role' => $authenticatedRequest->attributes->get('workdesk_user')->role,
+        ]));
 
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame('member', $response->getData()->role);
     }
 
-    public function test_authorization_bypass_setting_does_not_disable_origin_check(): void
+    public function test_bearer_token_is_required_and_must_be_valid(): void
     {
-        $request = Request::create(
-            'http://workdesk.test/api/meal-reports',
-            'POST',
-            [],
-            ['workdesk_session' => 'session-token'],
-            [],
-            ['HTTP_ORIGIN' => 'https://untrusted.example'],
-        );
+        $this->assertSame(401, $this->handle(null)->getStatusCode());
+        $this->assertSame(401, $this->handle('Bearer wrong-token')->getStatusCode());
+        $this->assertSame(401, $this->handle('Basic session-token')->getStatusCode());
+        $this->assertSame(200, $this->handle('Bearer session-token', null, 'POST')->getStatusCode());
 
-        $response = (new AuthenticateWorkdesk)->handle($request, fn () => response()->json(['ok' => true]));
+        // Cookie phiên cũ không còn được chấp nhận.
+        $cookieOnly = Request::create('http://workdesk.test/api/overtime/meta', 'GET', [], ['workdesk_session' => 'session-token']);
+        $this->assertSame(401, (new AuthenticateWorkdesk)->handle($cookieOnly, fn () => response()->json([]))->getStatusCode());
+    }
 
-        $this->assertSame(403, $response->getStatusCode());
+    public function test_expired_token_and_inactive_user_are_rejected(): void
+    {
+        DB::table('auth_sessions')->update(['expires_at' => (int) floor(microtime(true) * 1000) - 1]);
+        $this->assertSame(401, $this->handle('Bearer session-token')->getStatusCode());
+
+        DB::table('auth_sessions')->update(['expires_at' => (int) floor(microtime(true) * 1000) + 60_000]);
+        DB::table('users')->update(['active' => false]);
+        $this->assertSame(401, $this->handle('Bearer session-token')->getStatusCode());
+    }
+
+    private function handle(?string $authorization, ?Closure $next = null, string $method = 'GET')
+    {
+        $request = Request::create('http://workdesk.test/api/overtime/meta', $method);
+        if ($authorization !== null) {
+            $request->headers->set('Authorization', $authorization);
+        }
+
+        return (new AuthenticateWorkdesk)->handle($request, $next ?? fn () => response()->json(['ok' => true]));
     }
 }

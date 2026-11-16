@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useRealtimeRefresh } from '../../realtime'
 import { LocalizedTree } from '../../i18n'
-import { SearchPagination, SearchableSelect } from '../../components/SearchableControls'
+import { SearchPagination, SearchableMultiSelect, SearchableSelect } from '../../components/SearchableControls'
 import { useSearchPagination } from '../../hooks/useSearchPagination'
 
 const organizationLevels = [
   ['ceo', 'Tổng giám đốc'],
+  ['division_manager', 'Quản lý bộ phận'],
   ['division_head', 'Trưởng bộ phận'],
   ['department_head', 'Trưởng phòng'],
   ['team_lead', 'Team lead'],
@@ -21,7 +22,9 @@ const businessPermissions = [
 
 const adminOnlyPermissions = ['meal_hr', 'overtime_hr']
 
-const levelRanks = { employee: 0, team_lead: 1, department_head: 2, division_head: 3, ceo: 4 }
+// Quản lý bộ phận đứng trên Trưởng bộ phận và có thể quản lý nhiều bộ phận.
+const levelRanks = { employee: 0, team_lead: 1, department_head: 2, division_head: 3, division_manager: 4, ceo: 5 }
+const divisionLevels = ['division_head', 'division_manager']
 
 async function requestApi(url, options) {
   const response = await fetch(url, options)
@@ -45,7 +48,7 @@ function AdminUsers({ currentUser }) {
   const [accessTarget, setAccessTarget] = useState(null)
   const [accessForm, setAccessForm] = useState(null)
   const canCreateUsers = currentUser.role === 'admin' || currentUser.orgLevel === 'ceo'
-  const actorRank = currentUser.role === 'admin' ? 5 : (levelRanks[currentUser.orgLevel] ?? 0)
+  const actorRank = currentUser.role === 'admin' ? 6 : (levelRanks[currentUser.orgLevel] ?? 0)
   const assignableLevels = organizationLevels.filter(([level]) => actorRank > levelRanks[level])
   const userList = useSearchPagination(
     users,
@@ -142,7 +145,8 @@ function AdminUsers({ currentUser }) {
         body: JSON.stringify({
           orgLevel: accessForm.orgLevel,
           divisionId: accessForm.orgLevel === 'division_head' ? accessForm.divisionId || null : null,
-          departmentId: accessForm.orgLevel === 'division_head' ? null : accessForm.departmentId || null,
+          divisionIds: accessForm.orgLevel === 'division_manager' ? accessForm.divisionIds : [],
+          departmentId: divisionLevels.includes(accessForm.orgLevel) ? null : accessForm.departmentId || null,
           teamId: accessForm.teamId || null,
           permissions: accessForm.permissions,
         }),
@@ -162,6 +166,7 @@ function AdminUsers({ currentUser }) {
     setAccessForm({
       orgLevel: user.orgLevel || 'employee',
       divisionId: user.divisionId || '',
+      divisionIds: user.managedDivisionIds || [],
       departmentId: user.departmentId || '',
       teamId: user.teamId || '',
       permissions: user.permissions || [],
@@ -292,11 +297,31 @@ function AdminUsers({ currentUser }) {
                             ...accessForm,
                             orgLevel: value,
                             divisionId: '',
+                            divisionIds: [],
                             departmentId: '',
                             teamId: '',
                           })}
                         />
                       </div>
+                      {accessForm.orgLevel === 'division_manager' && (
+                        <div className="account-search-select">
+                          <span>Các bộ phận quản lý</span>
+                          <SearchableMultiSelect
+                            label="Các bộ phận quản lý"
+                            placeholder="Tìm bộ phận theo tên..."
+                            options={organization.divisions
+                              .filter((division) => !division.divisionManagerUserId
+                                || String(division.divisionManagerUserId) === String(user.id))
+                              .map((division) => ({
+                                value: division.id,
+                                label: division.name,
+                                searchText: division.name,
+                              }))}
+                            selectedValues={accessForm.divisionIds}
+                            onChange={(divisionIds) => setAccessForm({ ...accessForm, divisionIds })}
+                          />
+                        </div>
+                      )}
                       {accessForm.orgLevel === 'division_head' && (
                         <div className="account-search-select">
                           <span>Bộ phận</span>

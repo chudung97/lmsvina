@@ -18,8 +18,8 @@ class DepartmentsController extends ApiController
             ->leftJoin('users as managers', 'managers.id', '=', 'departments.manager_user_id')
             ->leftJoin('divisions', 'divisions.id', '=', 'departments.division_id');
         if (! OrganizationAccess::isOrganizationAdmin($user)) {
-            if ($user->org_level === 'division_head') {
-                $query->whereIn('departments.division_id', DB::table('divisions')->where('manager_user_id', $user->id)->select('id'));
+            if (OrganizationAccess::isDivisionLevel($user)) {
+                $query->whereIn('departments.division_id', OrganizationAccess::managedDivisionIds($user));
             } elseif ($user->org_level === 'department_head') {
                 $query->where('departments.manager_user_id', $user->id);
             } elseif ($user->org_level === 'team_lead') {
@@ -41,6 +41,8 @@ class DepartmentsController extends ApiController
             ])
             ->map(function ($department): object {
                 $department->memberCount = DB::table('users')->where('department_id', $department->id)->count();
+                $department->id = $this->responseId($department->id);
+                $department->divisionId = $this->responseId($department->divisionId);
                 $department->managerUserId = $this->responseUserId($department->managerUserId);
 
                 return $department;
@@ -67,8 +69,8 @@ class DepartmentsController extends ApiController
             return $this->error('Bộ phận được chọn không hợp lệ hoặc nằm ngoài phạm vi quản lý.', 403);
         }
         if (! OrganizationAccess::isOrganizationAdmin($current)
-            && ($current->org_level !== 'division_head' || ! $divisionId)) {
-            return $this->error('Chỉ admin, Tổng giám đốc hoặc trưởng bộ phận mới được tạo phòng ban.', 403);
+            && (! OrganizationAccess::isDivisionLevel($current) || ! $divisionId)) {
+            return $this->error('Chỉ admin, Tổng giám đốc, trưởng bộ phận hoặc quản lý bộ phận mới được tạo phòng ban.', 403);
         }
         if ($managerId !== null && (! is_string($managerId) || ! $this->activeUsersExist([$managerId]))) {
             return $this->error('Người quản lý phòng ban không hợp lệ.', 400);
@@ -91,10 +93,9 @@ class DepartmentsController extends ApiController
             }
         }
 
-        $id = (string) Str::uuid();
-        DB::transaction(function () use ($id, $name, $managerId, $divisionId): void {
-            DB::table('departments')->insert([
-                'id' => $id,
+        $id = null;
+        DB::transaction(function () use (&$id, $name, $managerId, $divisionId): void {
+            $id = (string) DB::table('departments')->insertGetId([
                 'name' => $name,
                 'division_id' => $divisionId,
                 'manager_user_id' => $managerId,
@@ -237,6 +238,7 @@ class DepartmentsController extends ApiController
         return response()->json($query->map(fn ($user) => [
             ...((array) $user),
             'id' => $this->responseUserId($user->id),
+            'departmentId' => $this->responseId($user->departmentId),
             'permissions' => ($permissions->get($user->id) ?? collect())->pluck('permission')->all(),
         ]));
     }
@@ -283,7 +285,7 @@ class DepartmentsController extends ApiController
         if (! $target || ! OrganizationAccess::canManageUser($current, $target)) {
             return $this->error('Bạn không có quyền quản lý tài khoản này.', 403);
         }
-        if ((int) $target->department_id !== (int) $id) {
+        if ((string) $target->department_id !== $id) {
             return $this->error('Tài khoản không thuộc phòng ban này.', 404);
         }
         DB::transaction(function () use ($userId, $id): void {
@@ -308,6 +310,8 @@ class DepartmentsController extends ApiController
                 'managers.name as managerName',
             ]);
         if ($department) {
+            $department->id = $this->responseId($department->id);
+            $department->divisionId = $this->responseId($department->divisionId);
             $department->managerUserId = $this->responseUserId($department->managerUserId);
         }
 

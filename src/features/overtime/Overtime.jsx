@@ -528,6 +528,91 @@ function ApprovalsTab({ month, onMonthChange, version, onChanged }) {
   )
 }
 
+const formatDateTime = (value, locale) => {
+  if (!value) return ''
+  const date = new Date(String(value).replace(' ', 'T'))
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(locale, {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(date)
+}
+
+/** Các dòng tăng ca mà người đăng nhập đã duyệt hoặc từ chối, theo tháng. */
+function DecidedTab({ month, onMonthChange, version }) {
+  const { locale } = useLocale()
+  const [decision, setDecision] = useState('')
+  const params = new URLSearchParams({ mode: 'decided', month })
+  if (decision) params.set('decision', decision)
+  const { data, loading, error } = useEntriesLoader(`/api/overtime/approvals?${params}`, [version])
+  const entries = data?.entries ?? []
+  const approvedByMe = entries.filter((entry) => entry.myStep?.status === 'approved')
+  const approvedHours = approvedByMe.reduce((total, entry) => total + Number(entry.hours || 0), 0)
+
+  return (
+    <section className="attendance-list-card" aria-labelledby="overtime-decided-title">
+      <div className="attendance-card-heading">
+        <div className="attendance-heading-icon" aria-hidden="true">☑</div>
+        <div>
+          <h2 id="overtime-decided-title">Tôi đã duyệt</h2>
+          <p>
+            {`${entries.length} dòng · Đã duyệt ${approvedByMe.length} dòng (${formatHours(approvedHours, locale)} giờ) · Từ chối ${entries.length - approvedByMe.length} dòng`}
+          </p>
+        </div>
+        <div className="overtime-segmented" role="group" aria-label="Lọc theo quyết định">
+          <button type="button" className={decision === '' ? 'active' : ''} onClick={() => setDecision('')}>Tất cả</button>
+          <button type="button" className={decision === 'approved' ? 'active' : ''} onClick={() => setDecision('approved')}>Đã duyệt</button>
+          <button type="button" className={decision === 'rejected' ? 'active' : ''} onClick={() => setDecision('rejected')}>Đã từ chối</button>
+        </div>
+        <MonthInput month={month} onChange={onMonthChange} />
+      </div>
+      {error && <p role="alert" className="attendance-error">{error}</p>}
+
+      <div className="attendance-table-wrap" aria-busy={loading}>
+        <table className="attendance-table overtime-table">
+          <thead>
+            <tr>
+              <th scope="col">Nhân viên</th>
+              <th scope="col">Phòng ban</th>
+              <th scope="col">Ngày</th>
+              <th scope="col">Ca</th>
+              <th scope="col">Số giờ</th>
+              <th scope="col">Ghi chú</th>
+              <th scope="col">Quyết định của tôi</th>
+              <th scope="col">Trạng thái hiện tại</th>
+              <th scope="col">Line duyệt</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!loading && entries.map((entry) => (
+              <tr key={entry.id}>
+                <td data-label="Nhân viên">{entry.userName}<small className="overtime-code">{entry.userCode}</small></td>
+                <td data-label="Phòng ban">{entry.departmentName || '—'}</td>
+                <td data-label="Ngày">{formatDate(entry.date, locale)}</td>
+                <td data-label="Ca">{entry.shiftLabel}</td>
+                <td data-label="Số giờ">{formatHours(entry.hours, locale)}</td>
+                <td data-label="Ghi chú" className="overtime-note">{entry.note || '—'}</td>
+                <td data-label="Quyết định của tôi">
+                  <span className={`overtime-status overtime-status-${entry.myStep?.status}`}>
+                    {entry.myStep?.status === 'approved' ? 'Đã duyệt' : 'Đã từ chối'}
+                  </span>
+                  {entry.myStep?.decidedAt && <small className="overtime-code">{formatDateTime(entry.myStep.decidedAt, locale)}</small>}
+                  {entry.myStep?.note && <small className="overtime-code">{entry.myStep.note}</small>}
+                </td>
+                <td data-label="Trạng thái hiện tại"><StatusBadge entry={entry} /></td>
+                <td data-label="Line duyệt"><ApprovalLine steps={entry.approvalSteps} /></td>
+              </tr>
+            ))}
+            {loading && <tr><td className="attendance-empty" colSpan="9">Đang tải dữ liệu...</td></tr>}
+            {!loading && !error && entries.length === 0 && (
+              <tr><td className="attendance-empty" colSpan="9">Bạn chưa duyệt tăng ca nào trong tháng này.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 function TeamOvertime({ meta, month, onMonthChange, version, onChanged }) {
   const { locale } = useLocale()
   const [departmentId, setDepartmentId] = useState('')
@@ -801,6 +886,7 @@ function Overtime() {
   const tabs = [
     ['mine', 'Tăng ca của tôi'],
     ['approvals', `Chờ tôi duyệt${meta?.pendingApprovalCount ? ` (${meta.pendingApprovalCount})` : ''}`],
+    ['decided', 'Tôi đã duyệt'],
     ...(meta?.canViewTeam ? [['team', 'Danh sách nhân viên']] : []),
   ]
 
@@ -841,6 +927,8 @@ function Overtime() {
 
           {tab === 'team' && meta.canViewTeam ? (
             <TeamOvertime meta={meta} month={month} onMonthChange={setMonth} version={version} onChanged={refresh} />
+          ) : tab === 'decided' ? (
+            <DecidedTab month={month} onMonthChange={setMonth} version={version} />
           ) : tab === 'approvals' ? (
             <ApprovalsTab month={month} onMonthChange={setMonth} version={version} onChanged={refresh} />
           ) : (

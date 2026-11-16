@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { setAuthToken } from '../../auth-token'
 import { LocalizedTree } from '../../i18n'
 import SealProfileEditor from '../pdf-seal/SealProfileEditor'
 
@@ -56,6 +57,8 @@ function AccountSecurity({ sessionUser, onUserUpdated }) {
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Không thể đổi mật khẩu.')
+      // Đổi mật khẩu thu hồi mọi token cũ; dùng token mới máy chủ vừa cấp.
+      if (result.token) setAuthToken(result.token)
       setForm({ currentPassword: '', newPassword: '', confirmation: '' })
       setNotice('Đã đổi mật khẩu. Các phiên đăng nhập khác đã bị đăng xuất.')
     } catch (requestError) {

@@ -53,6 +53,7 @@ Route::middleware(AuthenticateWorkdesk::class)->group(function (): void {
     Route::patch('/organization/divisions/{id}', [OrganizationController::class, 'updateDivision']);
     Route::delete('/organization/divisions/{id}', [OrganizationController::class, 'deleteDivision']);
     Route::post('/organization/divisions/{id}/manager', [OrganizationController::class, 'assignDivisionManager']);
+    Route::put('/organization/division-managers/{userId}', [OrganizationController::class, 'setDivisionManager']);
     Route::post('/organization/departments/{id}/manager', [OrganizationController::class, 'assignDepartmentManager']);
     Route::post('/organization/teams', [OrganizationController::class, 'storeTeam']);
     Route::patch('/organization/teams/{id}', [OrganizationController::class, 'updateTeam']);

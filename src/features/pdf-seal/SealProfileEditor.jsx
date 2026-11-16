@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { buildSealSvg, processUploadedImage, sealPalette, sealStyles, svgDataUrl, svgToPng } from './sealDesign'
 import './SealProfileEditor.css'
+import { AuthImage } from '../../components/AuthorizedMedia'
 
 const fieldLabels = {
   round: { org: 'Tên đơn vị (chạy vòng ngoài)', center: 'Chữ giữa', sub: 'Dòng dưới (VD: mã số DN, bộ phận)' },
@@ -204,12 +205,12 @@ function SealProfileEditor({ sessionUser, onUserUpdated }) {
           <span>Xem trước trên giấy</span>
           <div className="seal-paper">
             <div className="seal-paper-lines" aria-hidden="true"><i /><i /><i /><i /><i /></div>
-            {previewUrl ? <img src={previewUrl} alt="Xem trước con dấu" /> : <p>Chọn ảnh để xem trước.</p>}
+            {previewUrl ? <AuthImage src={previewUrl} alt="Xem trước con dấu" /> : <p>Chọn ảnh để xem trước.</p>}
           </div>
           {saved?.imageUrl && (
             <div className="seal-current">
               <span>Mẫu đang dùng</span>
-              <img src={saved.imageUrl} alt="Mẫu con dấu đang dùng" />
+              <AuthImage src={saved.imageUrl} alt="Mẫu con dấu đang dùng" />
             </div>
           )}
         </div>

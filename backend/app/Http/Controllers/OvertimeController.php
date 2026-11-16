@@ -34,7 +34,7 @@ class OvertimeController extends ApiController
         'rejected' => 'Đã từ chối',
     ];
 
-    private const MANAGER_LEVELS = ['ceo', 'division_head', 'department_head', 'team_lead'];
+    private const MANAGER_LEVELS = OrganizationAccess::MANAGER_LEVELS;
 
     private const MAX_APPROVERS = 10;
 
@@ -208,13 +208,19 @@ class OvertimeController extends ApiController
      * Tăng ca mà người đăng nhập nằm trong line duyệt.
      * mode=pending: các dòng đang đến lượt mình duyệt (mọi tháng).
      * mode=history: mọi dòng có mình trong line duyệt, theo tháng.
+     * mode=decided: các dòng mình đã duyệt hoặc từ chối, theo tháng
+     *   (decision=approved|rejected để lọc theo quyết định của mình).
      */
     public function approvals(Request $request): JsonResponse
     {
         $user = $this->user($request);
         $mode = $request->query('mode', 'pending');
-        if (! in_array($mode, ['pending', 'history'], true)) {
+        if (! in_array($mode, ['pending', 'history', 'decided'], true)) {
             return $this->error('Chế độ xem không hợp lệ.', 400);
+        }
+        $decision = $request->query('decision', '');
+        if (! in_array($decision, ['', 'approved', 'rejected'], true)) {
+            return $this->error('Bộ lọc quyết định không hợp lệ.', 400);
         }
 
         $query = $this->entriesQuery();
@@ -228,16 +234,21 @@ class OvertimeController extends ApiController
             }
             [$monthKey, $start, $end] = $month;
             $query->whereBetween('overtime_entries.work_date', [$start, $end])
-                ->whereExists(function ($subquery) use ($user): void {
+                ->whereExists(function ($subquery) use ($user, $mode, $decision): void {
                     $subquery->selectRaw('1')
                         ->from('overtime_approval_steps')
                         ->whereColumn('overtime_approval_steps.entry_id', 'overtime_entries.id')
                         ->where('overtime_approval_steps.user_id', $user->id);
+                    if ($mode === 'decided') {
+                        $decision === ''
+                            ? $subquery->whereIn('overtime_approval_steps.status', ['approved', 'rejected'])
+                            : $subquery->where('overtime_approval_steps.status', $decision);
+                    }
                 });
         }
 
         $rows = $query
-            ->orderBy('overtime_entries.work_date')
+            ->orderBy('overtime_entries.work_date', $mode === 'decided' ? 'desc' : 'asc')
             ->orderBy('users.name')
             ->orderBy('overtime_entries.shift_key')
             ->get();
@@ -392,14 +403,15 @@ class OvertimeController extends ApiController
         }
 
         $user = $this->user($request);
+        $entryIds = array_unique(array_map('intval', $ids));
         $updated = 0;
-        foreach (array_unique(array_map('intval', $ids)) as $entryId) {
+        foreach ($entryIds as $entryId) {
             if ($this->decide($user, $entryId, ...$input) === 'updated') {
                 $updated++;
             }
         }
 
-        return response()->json(['updated' => $updated, 'skipped' => count($ids) - $updated]);
+        return response()->json(['updated' => $updated, 'skipped' => count($entryIds) - $updated]);
     }
 
     /** Đặt hoặc bỏ ngày chốt công. */
@@ -766,6 +778,7 @@ class OvertimeController extends ApiController
                 'decidedAt' => $step->decided_at,
             ])->values();
             $currentStep = $row->status === 'pending' ? $approvalSteps->firstWhere('status', 'pending') : null;
+            $myStep = $approvalSteps->first(fn (array $step): bool => (int) $step['userId'] === (int) $viewer->id);
             $isOwner = (int) $row->user_id === (int) $viewer->id;
             $locked = $lockedUntil !== null && $date <= $lockedUntil;
             $canModify = ! $locked && ($isOwner
@@ -788,6 +801,8 @@ class OvertimeController extends ApiController
                 'approvalSteps' => $approvalSteps,
                 'currentApproverId' => $currentStep['userId'] ?? null,
                 'currentApproverName' => $currentStep['name'] ?? null,
+                // Bước duyệt của chính người đang xem (null nếu không nằm trong line).
+                'myStep' => $myStep,
                 'isOwner' => $isOwner,
                 'locked' => $locked,
                 'canEdit' => $canModify,

@@ -335,3 +335,45 @@ Artisan::command('workdesk:install-organization-hierarchy', function (): int {
 
     return Command::SUCCESS;
 })->purpose('Add organization hierarchy tables and columns to lms_vina safely');
+
+Artisan::command('workdesk:import-staff-file {path : Đường dẫn file .xlsx} {--sheet=VN staff 2026 : Tên sheet} {--apply : Ghi vào database (mặc định chỉ chạy thử)}', function (string $path): int {
+    $apply = (bool) $this->option('apply');
+    $report = (new \App\Support\StaffFileImporter)->run($path, (string) $this->option('sheet'), ! $apply);
+
+    $this->info(($apply ? 'ĐÃ GHI' : 'CHẠY THỬ (chưa ghi gì)')." — sheet \"{$this->option('sheet')}\"");
+    $this->line("Dòng trong file: {$report['rows']} · khớp user_code: {$report['matched']} · user được bổ sung dữ liệu: {$report['updatedUsers']}");
+    $columns = array_unique([...array_keys($report['filled']), ...array_keys($report['kept'])]);
+    $this->table(['Cột', 'Ô trống được điền', 'Giữ nguyên (DB khác file)'], array_map(
+        fn (string $column): array => [$column, $report['filled'][$column] ?? 0, $report['kept'][$column] ?? 0],
+        $columns,
+    ));
+    if ($report['notInDb']) {
+        $this->warn('Mã trong file không có trong users ('.count($report['notInDb']).'): '.implode(', ', $report['notInDb']));
+    }
+    foreach ($report['nameDiffs'] as $diff) {
+        $this->warn("Tên khác nhau {$diff['user_code']}: DB \"{$diff['db']}\" — file \"{$diff['file']}\" (giữ tên trong DB)");
+    }
+    foreach ($report['invalid'] as $invalid) {
+        $this->warn("Giá trị không hợp lệ, bỏ qua: {$invalid['user_code']} · {$invalid['column']} = \"{$invalid['file']}\"");
+    }
+
+    // Báo cáo chi tiết các ô DB khác file (chứa dữ liệu cá nhân: lưu trong storage/app/private, không commit).
+    $directory = storage_path('app/private/imports');
+    if (! is_dir($directory)) {
+        mkdir($directory, 0775, true);
+    }
+    $reportPath = $directory.'/staff-import-'.date('Ymd-His').($apply ? '' : '-dry-run').'.csv';
+    $handle = fopen($reportPath, 'w');
+    fwrite($handle, "\xEF\xBB\xBF");
+    fputcsv($handle, ['user_code', 'full_name', 'column', 'db_value', 'file_value']);
+    foreach ($report['conflicts'] as $conflict) {
+        fputcsv($handle, [$conflict['user_code'], $conflict['full_name'], $conflict['column'], $conflict['db'], $conflict['file']]);
+    }
+    fclose($handle);
+    $this->line('Danh sách ô DB khác file ('.count($report['conflicts']).' ô): '.$reportPath);
+    if (! $apply) {
+        $this->comment('Kiểm tra kết quả rồi chạy lại với --apply để ghi vào database.');
+    }
+
+    return Command::SUCCESS;
+})->purpose('Bổ sung thông tin nhân sự từ file Danh sách công nhân viên vào bảng users (chỉ điền ô trống)');

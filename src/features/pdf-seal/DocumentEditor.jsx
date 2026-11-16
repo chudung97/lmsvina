@@ -4,6 +4,7 @@ import { SearchableSelect } from '../../components/SearchableControls'
 import { useLocale } from '../../locale-context'
 import PdfPages from './PdfPages'
 import SealMark from './SealMark'
+import { AuthDownloadLink, AuthImage } from '../../components/AuthorizedMedia'
 
 const fallbackPage = { width: 773, height: 1094 }
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
@@ -320,8 +321,8 @@ function DocumentEditor({ documentId, sessionUser, onBack, onOpenSettings, onCha
         ) : detail.status === 'completed' ? (
           <div className="forward-bar locked">
             <span>Tài liệu đã khóa.</span>
-            <a className="completed-download primary-link" href={detail.stampedFileUrl}>Tải PDF đã đóng dấu</a>
-            <a className="completed-download" href={detail.fileUrl}>Tải bản gốc</a>
+            <AuthDownloadLink className="completed-download primary-link" href={detail.stampedFileUrl} filename={`stamped-${detail.name}`}>Tải PDF đã đóng dấu</AuthDownloadLink>
+            <AuthDownloadLink className="completed-download" href={detail.fileUrl} filename={detail.name}>Tải bản gốc</AuthDownloadLink>
           </div>
         ) : (
           <div className="forward-bar locked">
@@ -338,7 +339,7 @@ function DocumentEditor({ documentId, sessionUser, onBack, onOpenSettings, onCha
           {canEdit && (
             <section className="my-seal-card">
               <h3>Đóng dấu</h3>
-              {detail.sealProfile?.imageUrl ? <img src={detail.sealProfile.imageUrl} alt="Mẫu con dấu của tôi" /> : <p>Chưa thiết kế con dấu – sẽ dùng kiểu dấu chữ mặc định.</p>}
+              {detail.sealProfile?.imageUrl ? <AuthImage src={detail.sealProfile.imageUrl} alt="Mẫu con dấu của tôi" /> : <p>Chưa thiết kế con dấu – sẽ dùng kiểu dấu chữ mặc định.</p>}
               <button type="button" className="primary-action" disabled={busy} onClick={() => addSeal(Math.min(visiblePage, totalPages))}>
                 ＋ Đóng dấu vào trang {Math.min(visiblePage, totalPages)}
               </button>
@@ -355,7 +356,7 @@ function DocumentEditor({ documentId, sessionUser, onBack, onOpenSettings, onCha
             {seals.map((seal) => (
               <div key={seal.id} className={`user-row ${seal.id === selectedSealId ? 'selected' : ''}`}>
                 <div className="user-badge" style={{ background: seal.imageUrl ? '#fff' : seal.color }}>
-                  {seal.imageUrl ? <img src={seal.imageUrl} alt="" /> : seal.sealText}
+                  {seal.imageUrl ? <AuthImage src={seal.imageUrl} alt="" /> : seal.sealText}
                 </div>
                 <div>
                   <strong>{seal.name}{seal.userId === myId ? ' (tôi)' : ''}</strong>
