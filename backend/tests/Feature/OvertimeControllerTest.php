@@ -189,9 +189,32 @@ class OvertimeControllerTest extends TestCase
         $this->assertSame('pending', $resubmitted['status']);
         $this->assertSame(['1'], array_column($resubmitted['approvalSteps'], 'userId'));
 
-        $bulk = $this->invoke('bulkDecision', $this->manager, 'POST', ['ids' => [$entry['id']], 'decision' => 'approve'])->getData(true);
+        $bulk = $this->invoke('bulkDecision', $this->manager, 'POST', ['ids' => [$entry['id'], $entry['id']], 'decision' => 'approve'])->getData(true);
         $this->assertSame(1, $bulk['updated']);
+        $this->assertSame(0, $bulk['skipped']);
         $this->assertSame('approved', DB::table('overtime_entries')->where('id', $entry['id'])->value('status'));
+    }
+
+    public function test_decided_list_shows_entries_i_approved_or_rejected(): void
+    {
+        $approved = $this->create($this->employee, '2026-11-05', [5, 1])->getData(true)['entry'];
+        $rejected = $this->create($this->coworker, '2026-11-06', [5])->getData(true)['entry'];
+        $this->create($this->outsider, '2026-11-07', [5]);
+        $this->decision($this->approver, $approved['id'], 'approve', 'OK');
+        $this->decision($this->approver, $rejected['id'], 'reject', 'Sai giờ');
+
+        $all = $this->invoke('approvals', $this->approver, 'GET', ['mode' => 'decided', 'month' => '2026-11'])->getData(true);
+        $this->assertSame([$rejected['id'], $approved['id']], array_column($all['entries'], 'id'));
+        $byId = collect($all['entries'])->keyBy('id');
+        $this->assertSame('approved', $byId[$approved['id']]['myStep']['status']);
+        $this->assertSame('OK', $byId[$approved['id']]['myStep']['note']);
+        $this->assertSame('pending', $byId[$approved['id']]['status']);
+        $this->assertSame('rejected', $byId[$rejected['id']]['myStep']['status']);
+
+        $onlyApproved = $this->invoke('approvals', $this->approver, 'GET', ['mode' => 'decided', 'month' => '2026-11', 'decision' => 'approved'])->getData(true);
+        $this->assertSame([$approved['id']], array_column($onlyApproved['entries'], 'id'));
+        $this->assertCount(0, $this->invoke('approvals', $this->manager, 'GET', ['mode' => 'decided', 'month' => '2026-11'])->getData(true)['entries']);
+        $this->assertSame(400, $this->invoke('approvals', $this->approver, 'GET', ['mode' => 'decided', 'decision' => 'x'])->getStatusCode());
     }
 
     public function test_lock_date_blocks_changes_and_only_hr_can_set_it(): void

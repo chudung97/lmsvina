@@ -36,7 +36,7 @@ class MealReportsController extends ApiController
 
         $manageableDepartments = $this->manageableDepartments($user);
         $canManageReporters = $isAdmin || $user->org_level === 'ceo'
-            || in_array($user->org_level, ['division_head', 'department_head'], true);
+            || in_array($user->org_level, ['division_head', 'division_manager', 'department_head'], true);
 
         $departments = DB::table('departments')
             ->orderBy('name')
@@ -108,7 +108,7 @@ class MealReportsController extends ApiController
                 ->whereIn('department_id', $manageableIds)
                 ->where('active', 1)
                 ->where('role', '!=', 'admin')
-                ->whereNotIn('org_level', ['ceo', 'division_head', 'department_head'])
+                ->whereNotIn('org_level', ['ceo', 'division_head', 'division_manager', 'department_head'])
                 ->orderBy('name')
                 ->get(['id', 'department_id as departmentId', 'name', 'user_code'])
                 ->map(fn (object $person): array => [
@@ -174,7 +174,7 @@ class MealReportsController extends ApiController
             $assignedReporter = (string) $user->department_id === (string) $data['departmentId']
                 && (bool) ($user->active ?? false)
                 && $user->role !== 'admin'
-                && ! in_array($user->org_level, ['ceo', 'division_head', 'department_head'], true)
+                && ! in_array($user->org_level, ['ceo', 'division_head', 'division_manager', 'department_head'], true)
                 && in_array(
                     (string) $user->id,
                     $this->reporterUserIds($data['departmentId'], $data['shift']),
@@ -285,7 +285,7 @@ class MealReportsController extends ApiController
                 ->where('department_id', $departmentId)
                 ->where('active', 1)
                 ->where('role', '!=', 'admin')
-                ->whereNotIn('org_level', ['ceo', 'division_head', 'department_head'])
+                ->whereNotIn('org_level', ['ceo', 'division_head', 'division_manager', 'department_head'])
                 ->exists();
             if (! $eligible) {
                 return $this->error('Chỉ được phân công một nhân viên/trưởng nhóm đang hoạt động trong phòng ban.', 400);
@@ -336,7 +336,7 @@ class MealReportsController extends ApiController
             ->where('users.department_id', $departmentId)
             ->where('users.active', 1)
             ->where('users.role', '!=', 'admin')
-            ->whereNotIn('users.org_level', ['ceo', 'division_head', 'department_head'])
+            ->whereNotIn('users.org_level', ['ceo', 'division_head', 'division_manager', 'department_head'])
             ->pluck('meal_department_reporters.user_id')
             ->map(fn ($id): string => (string) $id)
             ->all();
@@ -346,7 +346,7 @@ class MealReportsController extends ApiController
     {
         return $user->role === 'admin'
             || $user->org_level === 'ceo'
-            || in_array($user->org_level ?? '', ['division_head', 'department_head'], true)
+            || in_array($user->org_level ?? '', ['division_head', 'division_manager', 'department_head'], true)
                 && OrganizationAccess::canManageDepartment($user, $departmentId);
     }
 }

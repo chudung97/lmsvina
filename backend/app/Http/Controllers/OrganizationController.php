@@ -16,9 +16,10 @@ class OrganizationController extends ApiController
         $current = $this->user($request);
         $divisions = DB::table('divisions')
             ->leftJoin('users as managers', 'managers.id', '=', 'divisions.manager_user_id')
+            ->leftJoin('users as division_managers', 'division_managers.id', '=', 'divisions.division_manager_user_id')
             ->when(! OrganizationAccess::isOrganizationAdmin($current), function ($query) use ($current): void {
-                if ($current->org_level === 'division_head') {
-                    $query->where('divisions.manager_user_id', $current->id);
+                if (OrganizationAccess::isDivisionLevel($current)) {
+                    $query->whereIn('divisions.id', OrganizationAccess::managedDivisionIds($current));
                 } elseif ($current->org_level === 'department_head') {
                     $query->whereIn('divisions.id', DB::table('departments')
                         ->where('manager_user_id', $current->id)
@@ -38,15 +39,19 @@ class OrganizationController extends ApiController
                 'divisions.name',
                 'divisions.manager_user_id as managerUserId',
                 'managers.name as managerName',
+                'divisions.division_manager_user_id as divisionManagerUserId',
+                'division_managers.name as divisionManagerName',
             ]);
+        foreach ($divisions as $division) {
+            $division->id = $this->responseId($division->id);
+            $division->divisionManagerUserId = $this->responseUserId($division->divisionManagerUserId);
+        }
 
         $departments = DB::table('departments')
             ->leftJoin('users as managers', 'managers.id', '=', 'departments.manager_user_id')
             ->when(! OrganizationAccess::isOrganizationAdmin($current), function ($query) use ($current): void {
-                if ($current->org_level === 'division_head') {
-                    $query->whereIn('departments.division_id', DB::table('divisions')
-                        ->where('manager_user_id', $current->id)
-                        ->select('id'));
+                if (OrganizationAccess::isDivisionLevel($current)) {
+                    $query->whereIn('departments.division_id', OrganizationAccess::managedDivisionIds($current));
                 } elseif ($current->org_level === 'department_head') {
                     $query->where('departments.manager_user_id', $current->id);
                 } elseif ($current->org_level === 'team_lead') {
@@ -70,10 +75,8 @@ class OrganizationController extends ApiController
             ->join('departments', 'departments.id', '=', 'teams.department_id')
             ->leftJoin('users as managers', 'managers.id', '=', 'teams.manager_user_id')
             ->when(! OrganizationAccess::isOrganizationAdmin($current), function ($query) use ($current): void {
-                if ($current->org_level === 'division_head') {
-                    $query->whereIn('departments.division_id', DB::table('divisions')
-                        ->where('manager_user_id', $current->id)
-                        ->select('id'));
+                if (OrganizationAccess::isDivisionLevel($current)) {
+                    $query->whereIn('departments.division_id', OrganizationAccess::managedDivisionIds($current));
                 } elseif ($current->org_level === 'department_head') {
                     $query->whereIn('teams.department_id', DB::table('departments')
                         ->where('manager_user_id', $current->id)
@@ -109,6 +112,12 @@ class OrganizationController extends ApiController
                     ->values());
         foreach ($teams as $team) {
             $team->memberUserIds = $teamMemberIds->get($team->id, collect());
+            $team->id = $this->responseId($team->id);
+            $team->departmentId = $this->responseId($team->departmentId);
+        }
+        foreach ($departments as $department) {
+            $department->id = $this->responseId($department->id);
+            $department->divisionId = $this->responseId($department->divisionId);
         }
 
         return response()->json([
@@ -122,12 +131,13 @@ class OrganizationController extends ApiController
     {
         $current = $this->user($request);
         $name = $this->validName($request->input('name'));
-        $managerId = $request->input('managerUserId');
-        if ($managerId === '') {
-            $managerId = null;
-        }
+        $managerId = $this->optionalUserId($request->input('managerUserId'));
+        $divisionManagerId = $this->optionalUserId($request->input('divisionManagerUserId'));
         if ($name === null) {
             return $this->error('Tên bộ phận phải từ 1 đến 120 ký tự.', 400);
+        }
+        if ($managerId === false || $divisionManagerId === false) {
+            return $this->error('Người quản lý không hợp lệ.', 400);
         }
         if (! OrganizationAccess::isOrganizationAdmin($current)) {
             return $this->error('Chỉ admin hoặc Tổng giám đốc mới được tạo bộ phận.', 403);
@@ -135,39 +145,25 @@ class OrganizationController extends ApiController
         if (DB::table('divisions')->where('name', $name)->exists()) {
             return $this->error('Tên bộ phận này đã tồn tại.', 409);
         }
-        if ($managerId !== null) {
-            if (! is_string($managerId)) {
-                return $this->error('Người quản lý không hợp lệ.', 400);
-            }
-            $manager = DB::table('users')->where('id', $managerId)->where('active', 1)->first();
-            if (! $manager || ! OrganizationAccess::canManageUser($current, $manager)
-                || ! OrganizationAccess::canAssignLevel($current, 'division_head')
-                || $manager->role === 'admin'
-                || $manager->org_level !== 'employee') {
-                return $this->error('Trưởng bộ phận phải là nhân viên cấp dưới đang hoạt động.', 403);
-            }
-            $alreadyManaging = DB::table('divisions')->where('manager_user_id', $managerId)->exists()
-                || DB::table('departments')->where('manager_user_id', $managerId)->exists()
-                || DB::table('teams')->where('manager_user_id', $managerId)->exists();
-            if ($alreadyManaging) {
-                return $this->error('Người này đang quản lý một đơn vị khác.', 409);
-            }
+        if ($managerId !== null && $managerId === $divisionManagerId) {
+            return $this->error('Trưởng bộ phận và Quản lý bộ phận phải là hai người khác nhau.', 400);
+        }
+        if ($managerId !== null && ($error = $this->divisionHeadError($current, $managerId))) {
+            return $error;
+        }
+        if ($divisionManagerId !== null && ($error = $this->divisionManagerError($current, $divisionManagerId))) {
+            return $error;
         }
 
-        $id = (string) Str::uuid();
-        DB::transaction(function () use ($id, $name, $managerId): void {
-            DB::table('divisions')->insert([
-                'id' => $id,
+        $id = null;
+        DB::transaction(function () use (&$id, $name, $managerId, $divisionManagerId): void {
+            $id = (string) DB::table('divisions')->insertGetId([
                 'name' => $name,
                 'manager_user_id' => $managerId,
+                'division_manager_user_id' => $divisionManagerId,
             ]);
-            if ($managerId) {
-                DB::table('users')->where('id', $managerId)->update([
-                    'org_level' => 'division_head',
-                    'department_id' => null,
-                ]);
-                DB::table('team_members')->where('user_id', $managerId)->delete();
-            }
+            $this->promoteDivisionManager($managerId, 'division_head');
+            $this->promoteDivisionManager($divisionManagerId, 'division_manager');
         });
         $this->broadcastAccounts();
 
@@ -179,14 +175,16 @@ class OrganizationController extends ApiController
         $current = $this->user($request);
         $name = $this->validName($request->input('name'));
         $division = DB::table('divisions')->where('id', $id)->first();
-        $managerId = $request->input('managerUserId', $division?->manager_user_id);
-        if ($managerId === '') {
-            $managerId = null;
-        }
+        $managerId = $request->exists('managerUserId')
+            ? $this->optionalUserId($request->input('managerUserId'))
+            : $this->optionalUserId($division?->manager_user_id);
+        $divisionManagerId = $request->exists('divisionManagerUserId')
+            ? $this->optionalUserId($request->input('divisionManagerUserId'))
+            : $this->optionalUserId($division?->division_manager_user_id);
         if ($name === null) {
             return $this->error('Tên bộ phận phải từ 1 đến 120 ký tự.', 400);
         }
-        if (! OrganizationAccess::canManageDivision($current, $id)) {
+        if (! OrganizationAccess::canEditDivision($current, $id)) {
             return $this->error('Bạn không có quyền sửa bộ phận này.', 403);
         }
         if (! $division) {
@@ -195,56 +193,56 @@ class OrganizationController extends ApiController
         if (DB::table('divisions')->where('name', $name)->where('id', '!=', $id)->exists()) {
             return $this->error('Tên bộ phận này đã tồn tại.', 409);
         }
-        if ($managerId !== null && ! is_string($managerId)) {
+        if ($managerId === false || $divisionManagerId === false) {
             return $this->error('Người quản lý không hợp lệ.', 400);
         }
-        if ($managerId && (string) $managerId !== (string) $division->manager_user_id) {
-            $manager = DB::table('users')->where('id', $managerId)->where('active', 1)->first();
-            if (! $manager || ! OrganizationAccess::canManageUser($current, $manager)
-                || ! OrganizationAccess::canAssignLevel($current, 'division_head')
-                || $manager->role === 'admin'
-                || $manager->org_level !== 'employee') {
-                return $this->error('Trưởng bộ phận phải là nhân viên cấp dưới đang hoạt động.', 403);
-            }
-            $alreadyManaging = DB::table('divisions')->where('manager_user_id', $managerId)->where('id', '!=', $id)->exists()
-                || DB::table('departments')->where('manager_user_id', $managerId)->exists()
-                || DB::table('teams')->where('manager_user_id', $managerId)->exists();
-            if ($alreadyManaging) {
-                return $this->error('Người này đang quản lý một đơn vị khác.', 409);
-            }
+        if ($managerId !== null && $managerId === $divisionManagerId) {
+            return $this->error('Trưởng bộ phận và Quản lý bộ phận phải là hai người khác nhau.', 400);
         }
-        if ($division->manager_user_id && (string) $division->manager_user_id !== (string) $managerId
-            && ! OrganizationAccess::isOrganizationAdmin($current)) {
-            return $this->error('Chỉ admin hoặc Tổng giám đốc mới được thay đổi trưởng bộ phận hiện tại.', 403);
+        $previousManagerId = $this->optionalUserId($division->manager_user_id);
+        $previousDivisionManagerId = $this->optionalUserId($division->division_manager_user_id);
+        // Đổi Trưởng bộ phận: cấp cao hơn Trưởng bộ phận (admin, Tổng giám đốc, Quản lý bộ phận của bộ phận này).
+        if ($previousManagerId !== $managerId && ! OrganizationAccess::canAssignLevel($current, 'division_head')) {
+            return $this->error('Chỉ admin, Tổng giám đốc hoặc Quản lý bộ phận mới được thay đổi trưởng bộ phận.', 403);
+        }
+        if ($previousDivisionManagerId !== $divisionManagerId
+            && ! OrganizationAccess::canAssignLevel($current, 'division_manager')) {
+            return $this->error('Chỉ admin hoặc Tổng giám đốc mới được thay đổi Quản lý bộ phận.', 403);
+        }
+        if ($managerId !== null && $managerId !== $previousManagerId
+            && ($error = $this->divisionHeadError($current, $managerId))) {
+            return $error;
+        }
+        if ($divisionManagerId !== null && $divisionManagerId !== $previousDivisionManagerId
+            && ($error = $this->divisionManagerError($current, $divisionManagerId))) {
+            return $error;
         }
 
-        DB::transaction(function () use ($id, $name, $managerId, $division): void {
+        DB::transaction(function () use ($id, $name, $managerId, $divisionManagerId, $previousManagerId, $previousDivisionManagerId): void {
             DB::table('divisions')->where('id', $id)->update([
                 'name' => $name,
                 'manager_user_id' => $managerId,
+                'division_manager_user_id' => $divisionManagerId,
             ]);
-            if ($division->manager_user_id && (string) $division->manager_user_id !== (string) $managerId) {
-                DB::table('users')->where('id', $division->manager_user_id)
-                    ->where('org_level', 'division_head')
+            if ($previousManagerId !== null && $previousManagerId !== $managerId) {
+                DB::table('users')->where('id', $previousManagerId)->where('org_level', 'division_head')
                     ->update(['org_level' => 'employee']);
             }
-            if ($managerId && (string) $managerId !== (string) $division->manager_user_id) {
-                DB::table('users')->where('id', $managerId)->update([
-                    'org_level' => 'division_head',
-                    'department_id' => null,
-                ]);
-                DB::table('team_members')->where('user_id', $managerId)->delete();
+            if ($previousDivisionManagerId !== $divisionManagerId) {
+                OrganizationAccess::demoteDivisionManagerIfIdle($previousDivisionManagerId);
             }
+            $this->promoteDivisionManager($managerId, 'division_head');
+            $this->promoteDivisionManager($divisionManagerId, 'division_manager');
         });
         $this->broadcastAccounts();
 
-        return $this->findDivision($id);
+        return response()->json($this->findDivision($id));
     }
 
     public function deleteDivision(Request $request, string $id): JsonResponse
     {
         $current = $this->user($request);
-        if (! OrganizationAccess::canManageDivision($current, $id)) {
+        if (! OrganizationAccess::canEditDivision($current, $id)) {
             return $this->error('Bạn không có quyền xóa bộ phận này.', 403);
         }
         if (! DB::table('divisions')->where('id', $id)->exists()) {
@@ -255,24 +253,140 @@ class OrganizationController extends ApiController
         }
 
         DB::transaction(function () use ($id): void {
-            $managerId = DB::table('divisions')->where('id', $id)->value('manager_user_id');
+            $division = DB::table('divisions')->where('id', $id)->first(['manager_user_id', 'division_manager_user_id']);
             DB::table('divisions')->where('id', $id)->delete();
-            if ($managerId) {
-                DB::table('users')->where('id', $managerId)->where('org_level', 'division_head')
+            if ($division->manager_user_id) {
+                DB::table('users')->where('id', $division->manager_user_id)->where('org_level', 'division_head')
                     ->update(['org_level' => 'employee']);
             }
+            OrganizationAccess::demoteDivisionManagerIfIdle($division->division_manager_user_id);
         });
         $this->broadcastAccounts();
 
         return response()->json(['ok' => true]);
     }
 
+    /**
+     * Gán Quản lý bộ phận cho danh sách bộ phận (thay toàn bộ danh sách cũ). Danh sách rỗng = gỡ khỏi mọi
+     * bộ phận và hạ về nhân viên. Chỉ admin hoặc Tổng giám đốc.
+     */
+    public function setDivisionManager(Request $request, string $userId): JsonResponse
+    {
+        $current = $this->user($request);
+        $divisionIds = $request->input('divisionIds');
+        if (! is_array($divisionIds)
+            || array_filter($divisionIds, fn ($value) => ! is_string($value) || $value === '')
+            || count($divisionIds) !== count(array_unique($divisionIds))) {
+            return $this->error('Danh sách bộ phận không hợp lệ.', 400);
+        }
+        if (! OrganizationAccess::canAssignLevel($current, 'division_manager')) {
+            return $this->error('Chỉ admin hoặc Tổng giám đốc mới được thay đổi Quản lý bộ phận.', 403);
+        }
+        $target = DB::table('users')->where('id', $userId)->first();
+        if (! $target) {
+            return $this->error('Không tìm thấy tài khoản.', 404);
+        }
+        if ($divisionIds) {
+            if ($error = $this->divisionManagerError($current, (string) $target->id)) {
+                return $error;
+            }
+            if (DB::table('divisions')->whereIn('id', $divisionIds)->count() !== count($divisionIds)) {
+                return $this->error('Không tìm thấy bộ phận được chọn.', 404);
+            }
+            if (DB::table('divisions')->whereIn('id', $divisionIds)
+                ->whereNotNull('division_manager_user_id')
+                ->where('division_manager_user_id', '!=', $target->id)
+                ->exists()) {
+                return $this->error('Một hoặc nhiều bộ phận đã có Quản lý bộ phận khác.', 409);
+            }
+        }
+
+        DB::transaction(function () use ($target, $divisionIds): void {
+            DB::table('divisions')->where('division_manager_user_id', $target->id)
+                ->whereNotIn('id', $divisionIds ?: [''])
+                ->update(['division_manager_user_id' => null]);
+            if ($divisionIds) {
+                DB::table('divisions')->whereIn('id', $divisionIds)->update(['division_manager_user_id' => $target->id]);
+                $this->promoteDivisionManager((string) $target->id, 'division_manager');
+            } else {
+                OrganizationAccess::demoteDivisionManagerIfIdle($target->id);
+            }
+        });
+        $this->broadcastAccounts();
+
+        return response()->json([
+            'userId' => $this->responseUserId($target->id),
+            'divisionIds' => DB::table('divisions')->where('division_manager_user_id', $target->id)->orderBy('name')->pluck('id')
+                ->map(fn ($id) => $this->responseId($id)),
+        ]);
+    }
+
+    /** Trưởng bộ phận mới: nhân viên đang hoạt động, cấp dưới của người bổ nhiệm, chưa quản lý đơn vị nào. */
+    private function divisionHeadError(object $current, string $userId): ?JsonResponse
+    {
+        $manager = DB::table('users')->where('id', $userId)->where('active', 1)->first();
+        if (! $manager || $manager->role === 'admin' || $manager->org_level !== 'employee'
+            || ! OrganizationAccess::canAssignLevel($current, 'division_head')
+            || ! OrganizationAccess::canManageUser($current, $manager)) {
+            return $this->error('Trưởng bộ phận phải là nhân viên cấp dưới đang hoạt động.', 403);
+        }
+        if (OrganizationAccess::managesAnyUnit($userId)) {
+            return $this->error('Người này đang quản lý một đơn vị khác.', 409);
+        }
+
+        return null;
+    }
+
+    /** Quản lý bộ phận: nhân viên chưa quản lý đơn vị nào, hoặc người đang là Quản lý bộ phận khác. */
+    private function divisionManagerError(object $current, string $userId): ?JsonResponse
+    {
+        $manager = DB::table('users')->where('id', $userId)->where('active', 1)->first();
+        if (! $manager || $manager->role === 'admin'
+            || ! in_array($manager->org_level, ['employee', 'division_manager'], true)
+            || ! OrganizationAccess::canAssignLevel($current, 'division_manager')
+            || ! OrganizationAccess::canManageUser($current, $manager)) {
+            return $this->error('Quản lý bộ phận phải là nhân viên hoặc Quản lý bộ phận đang hoạt động.', 403);
+        }
+        if (OrganizationAccess::managesAnyUnit($userId, ignoreDivisionManager: true)) {
+            return $this->error('Người này đang quản lý một đơn vị khác.', 409);
+        }
+
+        return null;
+    }
+
+    private function promoteDivisionManager(?string $userId, string $level): void
+    {
+        if ($userId === null) {
+            return;
+        }
+        DB::table('users')->where('id', $userId)->update([
+            'org_level' => $level,
+            'department_id' => null,
+        ]);
+        DB::table('team_members')->where('user_id', $userId)->delete();
+    }
+
+    /** null/'' => null, id hợp lệ => chuỗi id, kiểu sai => false. */
+    private function optionalUserId(mixed $value): string|false|null
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return is_string($value) || is_int($value) ? (string) $value : false;
+    }
+
+    /** Tạo team mới trong một phòng ban, tên team tự đặt (không trùng trong cùng phòng ban). */
     public function storeTeam(Request $request): JsonResponse
     {
         $current = $this->user($request);
-        $departmentId = $request->input('departmentId');
-        if (! is_string($departmentId) || $departmentId === '') {
+        $departmentId = $this->optionalUserId($request->input('departmentId'));
+        $name = $this->validName($request->input('name'));
+        if (! is_string($departmentId)) {
             return $this->error('Phòng ban không hợp lệ.', 400);
+        }
+        if ($name === null) {
+            return $this->error('Tên team phải từ 1 đến 120 ký tự.', 400);
         }
         if (! OrganizationAccess::canManageDepartment($current, $departmentId)) {
             return $this->error('Bạn không có quyền tạo team trong phòng ban này.', 403);
@@ -281,46 +395,31 @@ class OrganizationController extends ApiController
         if (! $department) {
             return $this->error('Không tìm thấy phòng ban.', 404);
         }
-        $existingTeam = DB::table('teams')->where('department_id', $departmentId)->first();
-        $memberIds = $this->validateTeamMembers(
-            $request->input('memberUserIds', []),
-            $departmentId,
-            $current,
-            $existingTeam?->id,
-        );
+        if ($this->teamNameTaken($departmentId, $name)) {
+            return $this->error('Phòng ban này đã có team cùng tên.', 409);
+        }
+        $memberIds = $this->validateTeamMembers($request->input('memberUserIds', []), $departmentId, $current);
         if ($memberIds instanceof JsonResponse) {
             return $memberIds;
         }
 
-        $id = $existingTeam?->id ?? (string) Str::uuid();
-        DB::transaction(function () use ($id, $departmentId, $department, $memberIds, $existingTeam): void {
-            if ($existingTeam) {
-                DB::table('teams')->where('id', $id)->update(['name' => $department->name]);
-                DB::table('team_members')->where('team_id', $id)->delete();
-            } else {
-                DB::table('teams')->insert(['id' => $id, 'department_id' => $departmentId, 'name' => $department->name]);
-            }
-            if ($memberIds) {
-                DB::table('users')->whereIn('id', $memberIds)
-                    ->whereNull('department_id')
-                    ->update(['department_id' => $departmentId]);
-                DB::table('team_members')->insert(array_map(
-                    fn (string $userId) => ['user_id' => $userId, 'team_id' => $id],
-                    $memberIds,
-                ));
-            }
+        $id = null;
+        DB::transaction(function () use (&$id, $departmentId, $name, $memberIds): void {
+            $id = (string) DB::table('teams')->insertGetId(['department_id' => $departmentId, 'name' => $name]);
+            $this->replaceTeamMembers($id, $departmentId, $memberIds);
         });
         $this->broadcastAccounts();
 
         return response()->json([
-            'id' => $id,
-            'departmentId' => $departmentId,
-            'name' => $department->name,
-            'managerUserId' => $existingTeam ? $this->responseUserId($existingTeam->manager_user_id) : null,
+            'id' => $this->responseId($id),
+            'departmentId' => $this->responseId($departmentId),
+            'name' => $name,
+            'managerUserId' => null,
             'memberUserIds' => $memberIds,
-        ], $existingTeam ? 200 : 201);
+        ], 201);
     }
 
+    /** Đổi tên team và/hoặc danh sách thành viên. Team vẫn thuộc phòng ban cũ. */
     public function updateTeam(Request $request, string $id): JsonResponse
     {
         $current = $this->user($request);
@@ -331,39 +430,64 @@ class OrganizationController extends ApiController
         if (! OrganizationAccess::canManageTeam($current, $id)) {
             return $this->error('Bạn không có quyền sửa team này.', 403);
         }
-        $departmentName = DB::table('departments')->where('id', $team->department_id)->value('name');
+        $name = $team->name;
+        if ($request->exists('name')) {
+            $name = $this->validName($request->input('name'));
+            if ($name === null) {
+                return $this->error('Tên team phải từ 1 đến 120 ký tự.', 400);
+            }
+            if ($this->teamNameTaken((string) $team->department_id, $name, $id)) {
+                return $this->error('Phòng ban này đã có team cùng tên.', 409);
+            }
+        }
         $memberIds = null;
         if ($request->exists('memberUserIds')) {
-            $memberIds = $this->validateTeamMembers($request->input('memberUserIds'), $team->department_id, $current, $id);
+            $memberIds = $this->validateTeamMembers($request->input('memberUserIds'), (string) $team->department_id, $current, $id);
             if ($memberIds instanceof JsonResponse) {
                 return $memberIds;
             }
         }
-        DB::transaction(function () use ($id, $departmentName, $memberIds, $team): void {
-            DB::table('teams')->where('id', $id)->update(['name' => $departmentName]);
+        DB::transaction(function () use ($id, $name, $memberIds, $team): void {
+            DB::table('teams')->where('id', $id)->update(['name' => $name]);
             if ($memberIds !== null) {
-                DB::table('team_members')->where('team_id', $id)->delete();
-                if ($memberIds) {
-                    DB::table('users')->whereIn('id', $memberIds)
-                        ->whereNull('department_id')
-                        ->update(['department_id' => $team->department_id]);
-                    DB::table('team_members')->insert(array_map(
-                        fn (string $userId) => ['user_id' => $userId, 'team_id' => $id],
-                        $memberIds,
-                    ));
-                }
+                $this->replaceTeamMembers($id, (string) $team->department_id, $memberIds);
             }
         });
         $this->broadcastAccounts();
 
         return response()->json([
-            'id' => $id,
-            'departmentId' => $team->department_id,
-            'name' => $departmentName,
+            'id' => $this->responseId($id),
+            'departmentId' => $this->responseId($team->department_id),
+            'name' => $name,
             'managerUserId' => $this->responseUserId($team->manager_user_id),
             'memberUserIds' => $memberIds ?? DB::table('team_members')->where('team_id', $id)->pluck('user_id')
                 ->map(fn ($userId) => $this->responseUserId($userId)),
         ]);
+    }
+
+    private function teamNameTaken(string $departmentId, string $name, ?string $exceptTeamId = null): bool
+    {
+        return DB::table('teams')
+            ->where('department_id', $departmentId)
+            ->where('name', $name)
+            ->when($exceptTeamId !== null, fn ($query) => $query->where('id', '!=', $exceptTeamId))
+            ->exists();
+    }
+
+    /** Thay thành viên team; nhân viên chưa có phòng ban được gán vào phòng ban của team. */
+    private function replaceTeamMembers(string $teamId, string $departmentId, array $memberIds): void
+    {
+        DB::table('team_members')->where('team_id', $teamId)->delete();
+        if (! $memberIds) {
+            return;
+        }
+        DB::table('users')->whereIn('id', $memberIds)
+            ->whereNull('department_id')
+            ->update(['department_id' => $departmentId]);
+        DB::table('team_members')->insert(array_map(
+            fn (string $userId) => ['user_id' => $userId, 'team_id' => $teamId],
+            $memberIds,
+        ));
     }
 
     public function deleteTeam(Request $request, string $id): JsonResponse
@@ -419,7 +543,7 @@ class OrganizationController extends ApiController
             return $this->error('Loại đơn vị tổ chức không hợp lệ.', 400);
         }
         $allowed = match ($type) {
-            'division' => OrganizationAccess::canManageDivision($current, $id),
+            'division' => OrganizationAccess::canEditDivision($current, $id),
             'department' => OrganizationAccess::canManageDepartment($current, $id)
                 && ($current->org_level !== 'department_head' || OrganizationAccess::isSystemAdmin($current)),
             'team' => OrganizationAccess::canManageTeam($current, $id),
@@ -471,16 +595,15 @@ class OrganizationController extends ApiController
         if ($existing) {
             return $this->error('Người này đang quản lý đơn vị khác.', 409);
         }
-        $oldUnit = DB::table('divisions')->where('manager_user_id', $managerId)->exists()
-            || DB::table('departments')->where('manager_user_id', $managerId)->exists()
-            || DB::table('teams')->where('manager_user_id', $managerId)->exists();
+        $oldUnit = OrganizationAccess::managesAnyUnit($managerId);
         if ($oldUnit && (int) $unit->manager_user_id !== (int) $managerId) {
             return $this->error('Người này đang quản lý một đơn vị khác.', 409);
         }
         $previousId = $unit->manager_user_id;
         if ($previousId && (int) $previousId !== (int) $managerId
-            && ! OrganizationAccess::isSystemAdmin($current)
-            && ! OrganizationAccess::isOrganizationAdmin($current)) {
+            && ! OrganizationAccess::isOrganizationAdmin($current)
+            // Quản lý bộ phận (cấp trên Trưởng bộ phận) được đổi Trưởng bộ phận của bộ phận mình quản lý.
+            && ! ($type === 'division' && $current->org_level === 'division_manager')) {
             return $this->error('Chỉ admin hoặc Tổng giám đốc mới được thay đổi người quản lý hiện tại.', 403);
         }
 
@@ -514,10 +637,20 @@ class OrganizationController extends ApiController
     {
         $division = DB::table('divisions')
             ->leftJoin('users as managers', 'managers.id', '=', 'divisions.manager_user_id')
+            ->leftJoin('users as division_managers', 'division_managers.id', '=', 'divisions.division_manager_user_id')
             ->where('divisions.id', $id)
-            ->first(['divisions.id', 'divisions.name', 'divisions.manager_user_id as managerUserId', 'managers.name as managerName']);
+            ->first([
+                'divisions.id', 'divisions.name',
+                'divisions.manager_user_id as managerUserId', 'managers.name as managerName',
+                'divisions.division_manager_user_id as divisionManagerUserId', 'division_managers.name as divisionManagerName',
+            ]);
 
-        return [...(array) $division, 'managerUserId' => $this->responseUserId($division->managerUserId)];
+        return [
+            ...(array) $division,
+            'id' => $this->responseId($division->id),
+            'managerUserId' => $this->responseUserId($division->managerUserId),
+            'divisionManagerUserId' => $this->responseUserId($division->divisionManagerUserId),
+        ];
     }
 
     private function validateTeamMembers(

@@ -10,6 +10,7 @@ import PdfSeal from './features/pdf-seal/PdfSeal'
 import PermitRequests from './features/permits/PermitRequests'
 import Warehouse from './features/warehouse/Warehouse'
 import { connectRealtime } from './realtime'
+import { clearAuthToken, setAuthToken, UNAUTHORIZED_EVENT } from './auth-token'
 import { LanguagePicker, LocalizedTree } from './i18n'
 import './App.css'
 
@@ -21,9 +22,9 @@ function App() {
   const [authError, setAuthError] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
   const canManageUsers = auth?.user?.role === 'admin'
-    || ['ceo', 'division_head', 'department_head', 'team_lead'].includes(auth?.user?.orgLevel)
+    || ['ceo', 'division_head', 'division_manager', 'department_head', 'team_lead'].includes(auth?.user?.orgLevel)
   const canManageDepartments = auth?.user?.role === 'admin'
-    || ['ceo', 'division_head', 'department_head'].includes(auth?.user?.orgLevel)
+    || ['ceo', 'division_head', 'division_manager', 'department_head'].includes(auth?.user?.orgLevel)
   const updateSessionUser = useCallback((user) => {
     setAuth((current) => ({ ...current, user }))
   }, [])
@@ -32,6 +33,18 @@ function App() {
     if (!auth?.authenticated || !auth.user?.id) return undefined
     return connectRealtime(auth.user.id)
   }, [auth?.authenticated, auth?.user?.id])
+
+  // Token hết hạn hoặc bị thu hồi (máy chủ trả 401): quay về màn hình đăng nhập.
+  useEffect(() => {
+    const signOut = () => {
+      setAuth((current) => (current?.authenticated
+        ? { authenticated: false, setupRequired: false, user: null }
+        : current))
+      setActiveFeature('meetings')
+    }
+    window.addEventListener(UNAUTHORIZED_EVENT, signOut)
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, signOut)
+  }, [])
 
   useEffect(() => {
     if (!auth?.authenticated) return undefined
@@ -91,6 +104,8 @@ function App() {
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Đăng nhập thất bại.')
+      if (!result.token) throw new Error('Máy chủ không trả về token đăng nhập.')
+      setAuthToken(result.token)
       setAuth({ authenticated: true, setupRequired: false, user: result.user })
       setCredentials({ identifier: '', password: '' })
     } catch (error) {
@@ -105,6 +120,7 @@ function App() {
     try {
       const response = await fetch('/api/auth/logout', { method: 'POST' })
       if (!response.ok) throw new Error('Không thể đăng xuất.')
+      clearAuthToken()
       setAuth({ authenticated: false, setupRequired: false, user: null })
       setActiveFeature('meetings')
     } catch (error) {

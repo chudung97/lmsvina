@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\AuthToken;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -11,18 +12,10 @@ use Symfony\Component\Process\Process;
 
 class AuthController extends ApiController
 {
+    /** Trạng thái đăng nhập theo token Bearer gửi kèm (không có token: chưa đăng nhập). */
     public function status(Request $request): JsonResponse
     {
-        $token = $request->cookie('workdesk_session');
-        $user = is_string($token) && strlen($token) <= 128
-            ? DB::table('auth_sessions')
-                ->join('users', 'users.id', '=', 'auth_sessions.user_id')
-                ->where('auth_sessions.token_hash', hash('sha256', $token))
-                ->where('auth_sessions.expires_at', '>', (int) floor(microtime(true) * 1000))
-                ->where('users.active', 1)
-                ->select('users.*')
-                ->first()
-            : null;
+        $user = AuthToken::user(AuthToken::fromRequest($request));
 
         return response()->json([
             'authenticated' => (bool) $user,
@@ -35,11 +28,12 @@ class AuthController extends ApiController
         ]);
     }
 
+    /**
+     * Kiểm tra user_code (hoặc email) + mật khẩu, trả về token Bearer:
+     * { token, tokenType: "Bearer", expiresAt, expiresIn, user }.
+     */
     public function login(Request $request): JsonResponse
     {
-        if (! $this->originAllowed($request)) {
-            return $this->error('Yêu cầu không cùng nguồn bị từ chối.', 403);
-        }
         $identifier = $request->input('identifier', $request->input('email'));
         $password = $request->input('password');
         if (! is_string($identifier) || ! is_string($password)) {
@@ -80,26 +74,19 @@ class AuthController extends ApiController
         }
 
         RateLimiter::clear($key);
-        DB::table('auth_sessions')->where('expires_at', '<=', (int) floor(microtime(true) * 1000))->delete();
-        $token = $this->newSession($user->id);
+        AuthToken::purgeExpired();
+        $token = AuthToken::issue($user->id);
         $user = DB::table('users')->where('id', $user->id)->first();
 
-        return response()->json(['user' => $this->publicUser($user)])
-            ->withCookie($this->sessionCookie($token));
+        return response()->json([...$token, 'user' => $this->publicUser($user)]);
     }
 
+    /** Thu hồi token đang dùng. */
     public function logout(Request $request): JsonResponse
     {
-        if (! $this->originAllowed($request)) {
-            return $this->error('Yêu cầu không cùng nguồn bị từ chối.', 403);
-        }
-        $token = $request->cookie('workdesk_session');
-        if (is_string($token) && strlen($token) <= 128) {
-            DB::table('auth_sessions')->where('token_hash', hash('sha256', $token))->delete();
-        }
+        AuthToken::revoke(AuthToken::fromRequest($request));
 
-        return response()->json(['ok' => true])
-            ->withCookie($this->sessionCookie('', 0));
+        return response()->json(['ok' => true]);
     }
 
     private function verifyPassword(string $password, string $encoded, ?string $userId): bool
@@ -131,20 +118,5 @@ class AuthController extends ApiController
         }
 
         return $valid === true;
-    }
-
-    private function originAllowed(Request $request): bool
-    {
-        $origin = $request->header('Origin');
-        if (! $origin) {
-            return true;
-        }
-
-        $originHost = parse_url($origin, PHP_URL_HOST);
-        $requestHost = $request->getHost();
-
-        return $origin === $request->getSchemeAndHttpHost()
-            || in_array($originHost, ['localhost', '127.0.0.1'], true)
-               && in_array($requestHost, ['localhost', '127.0.0.1'], true);
     }
 }
